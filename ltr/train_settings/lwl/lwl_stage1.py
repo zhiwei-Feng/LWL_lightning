@@ -1,8 +1,9 @@
 import math
+import os
 from collections import OrderedDict
 
 import torch
-
+import torch.optim as optim
 from ltr.data_module.train_dm import LWLDataModule
 import pytorch_lightning as pl
 import ltr.models.backbone as backbones
@@ -14,7 +15,9 @@ import ltr.models.lwl.loss_residual_modules as loss_residual_modules
 import ltr.models.meta.steepestdescent as steepestdescent
 import ltr.models.lwl.linear_filter as target_clf
 import ltr.models.lwl.decoder as lwtl_decoder
+from ltr.models.loss.segmentation import LovaszSegLoss
 from pytracking import TensorList
+from pytracking.analysis.vos_utils import davis_jaccard_measure
 
 
 def run(settings):
@@ -46,7 +49,7 @@ def run(settings):
 
 
 class LitLwlStage1(pl.LightningModule):
-    def __init__(self, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
+    def __init__(self, settings, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
                  backbone_pretrained=False, clf_feat_blocks=1,
                  clf_feat_norm=True, final_conv=False,
                  out_feature_dim=512,
@@ -60,7 +63,7 @@ class LitLwlStage1(pl.LightningModule):
                  dilation_factors=None,
                  backbone_type='imagenet'):
         super().__init__()
-
+        self.settings = settings
         # backbone feature extractor F
         if backbone_type == 'imagenet':
             backbone_net = backbones.resnet50(pretrained=backbone_pretrained, frozen_layers=frozen_backbone_layers)
@@ -108,16 +111,110 @@ class LitLwlStage1(pl.LightningModule):
         decoder = lwtl_decoder.LWTLDecoder(num_filters, decoder_mdim, decoder_input_layers_channels, use_bn=True)
 
         # build lwl model
-        net = LWTLNet(feature_extractor=backbone_net, target_model=target_model, decoder=decoder,
-                      label_encoder=label_encoder,
-                      target_model_input_layer=target_model_input_layer, decoder_input_layers=decoder_input_layers)
+        self.net = LWTLNet(feature_extractor=backbone_net, target_model=target_model, decoder=decoder,
+                           label_encoder=label_encoder,
+                           target_model_input_layer=target_model_input_layer, decoder_input_layers=decoder_input_layers)
+        # Load pre-trained maskrcnn weights
+        self._load_pretrained_weights()
 
+        # Loss function
+        self.objective = {
+            'segm': LovaszSegLoss(per_image=False),
+        }
+        self.loss_weight = {
+            'segm': 100.0
+        }
+
+        # Optimizer
+        self.optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
+                                {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 1e-4},
+                                {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
+                                {'params': self.net.decoder.parameters(), 'lr': 1e-4},
+                                {'params': self.net.label_encoder.parameters(), 'lr': 2e-4}],
+                               lr=2e-4)
+        self.lr_scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[40, ], gamma=0.2)
+
+        # actor初始化
+        self.num_refinement_iter = 2
+        self.disable_backbone_bn = False
+        self.disable_all_bn = True
+        self._update_settings(settings)
+
+    def _train_actor(self, mode=True):
+        """ Set whether the network is in train mode.
+                args:
+                    mode (True) - Bool specifying whether in training mode.
+                """
+        self.net.train(mode)
+
+        if self.disable_all_bn:
+            self.net.eval()
+        elif self.disable_backbone_bn:
+            for m in self.net.feature_extractor.modules():
+                if isinstance(m, torch.nn.BatchNorm2d):
+                    m.eval()
+
+    def _load_pretrained_weights(self):
+        weights_path = os.path.join(self.env.pretrained_networks, 'e2e_mask_rcnn_R_50_FPN_1x_converted.pkl')
+        pretrained_weights = torch.load(weights_path)
+        self.net.feature_extractor.load_state_dict(pretrained_weights)
+
+    def _update_settings(self, settings=None):
+        """Updates the trainer settings. Must be called to update internal settings."""
+        if settings is not None:
+            self.settings = settings
+
+        if self.settings.env.workspace_dir is not None:
+            self.settings.env.workspace_dir = os.path.expanduser(self.settings.env.workspace_dir)
+            self._checkpoint_dir = os.path.join(self.settings.env.workspace_dir, 'checkpoints')
+            if not os.path.exists(self._checkpoint_dir):
+                os.makedirs(self._checkpoint_dir)
+        else:
+            self._checkpoint_dir = None
 
     def training_step(self, batch, batch_idx):
-        pass
+        """
+        Lightning calls this inside the training loop
+        :param batch:
+        :param batch_idx:
+        :return:
+        """
+        print(batch)
+        data = batch
+        data['epoch'] = self.epoch
+        data['settings'] = self.settings
+        # loss, stats = self.actor(data)
+        segm_pred = self.net(train_imgs=data['train_images'],
+                             test_imgs=data['test_images'],
+                             train_masks=data['train_masks'],
+                             test_masks=data['test_masks'],
+                             num_refinement_iter=self.num_refinement_iter)
 
-    def validation_step(self, batch, batch_idx):
-        pass
+        acc = 0
+        cnt = 0
+
+        segm_pred = segm_pred.view(-1, 1, *segm_pred.shape[-2:])
+        gt_segm = data['test_masks']
+        gt_segm = gt_segm.view(-1, 1, *gt_segm.shape[-2:])
+
+        loss_segm = self.loss_weight['segm'] * self.objective['segm'](segm_pred, gt_segm)
+
+        # acc_l = [davis_jaccard_measure(torch.sigmoid(rm.detach()).cpu().numpy() > 0.5, lb.cpu().numpy()) for
+        #          rm, lb in zip(segm_pred.view(-1, *segm_pred.shape[-2:]), gt_segm.view(-1, *segm_pred.shape[-2:]))]
+        # acc += sum(acc_l)
+        # cnt += len(acc_l)
+
+        loss = loss_segm
+
+        if torch.isinf(loss) or torch.isnan(loss):
+            raise Exception('ERROR: Loss was nan or inf!!!')
+
+        return loss.items()
+
+    def configure_optimizers(
+            self,
+    ):
+        return [self.optimizer], [self.lr_scheduler]
 
 
 class LWTLNet(torch.nn.Module):
@@ -228,22 +325,6 @@ class LWTLNet(torch.nn.Module):
         assert target_filter.dim() == 5  # seq, filters, ch, h, w
         test_feat_tm = test_feat_tm.view(1, 1, *test_feat_tm.shape[-3:])
         mask_encoding_pred = self.target_model.apply_target_model(target_filter, test_feat_tm)
-        # print("obj id", obj_id)
-        # print("image", image.shape) [480, 854, 3]
-        # print("mask", mask.size()) [1, 1, 480, 854]
-        # image_tensor = torch.from_numpy(image).permute(2, 0, 1)
-        # writer = SummaryWriter()
-        # writer.add_image("cur_image", image_tensor)
-        # show_mask = mask_encoding_pred.squeeze(0).permute(1, 0, 2, 3)
-        # show_mask = F.interpolate(show_mask, image_tensor.size()[-2:], mode='nearest')
-        # writer.add_image("target_model",
-        #                  make_grid(show_mask, nrow=4, padding=20, normalize=True, scale_each=True, pad_value=1), 0)
-        # writer.add_image("mask", mask.squeeze(0))
-
-        # print("show mask", show_mask.size()) [16, 1, 480, 854]
-        # print("mask_encoding_pred size", mask_encoding_pred.size()) [1, 1, 16, 30, 52]
-        # print("mask_encoding_pred min", torch.min(mask_encoding_pred)) 有负
-        # print("mask_encoding_pred max", torch.max(mask_encoding_pred)) 正有24
 
         mask_pred, decoder_feat = self.decoder(mask_encoding_pred, test_feat,
                                                (test_feat_tm.shape[-2] * 16, test_feat_tm.shape[-1] * 16))
