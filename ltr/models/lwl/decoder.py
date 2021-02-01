@@ -103,8 +103,7 @@ class LWTLDecoder(nn.Module):
         self.RRB2 = nn.ModuleDict()
         self.proj = nn.ModuleDict()
 
-        # focus: 训练过程设置为num_filters=16， 修改为28
-        ic = in_channels + 12
+        ic = in_channels
 
         oc = {'layer1': 1, 'layer2': 2, 'layer3': 2, 'layer4': 4}
         out_feature_channels = {}

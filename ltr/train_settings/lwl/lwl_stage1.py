@@ -168,7 +168,7 @@ class LitLwlStage1(pl.LightningModule):
                     m.eval()
 
     def _load_pretrained_weights(self):
-        weights_path = os.path.join(self.env.pretrained_networks, 'e2e_mask_rcnn_R_50_FPN_1x_converted.pkl')
+        weights_path = os.path.join(self.settings.env.pretrained_networks, 'e2e_mask_rcnn_R_50_FPN_1x_converted.pkl')
         pretrained_weights = torch.load(weights_path)
         self.net.feature_extractor.load_state_dict(pretrained_weights)
 
@@ -192,9 +192,9 @@ class LitLwlStage1(pl.LightningModule):
         :param batch_idx:
         :return:
         """
-        print(batch)
+        print(type(batch))
         data = batch
-        data['epoch'] = self.epoch
+        # data['epoch'] = self.epoch
         data['settings'] = self.settings
         # loss, stats = self.actor(data)
         segm_pred = self.net(train_imgs=data['train_images'],
