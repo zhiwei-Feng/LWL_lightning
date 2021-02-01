@@ -1,10 +1,10 @@
 class EnvironmentSettings:
     def __init__(self):
-        self.workspace_dir = ''
+        self.workspace_dir = '/DATACENTER/2/fzw/lwl/test_lightning'
         self.tensorboard_dir = self.workspace_dir + '/tensorboard/'
         self.pretrained_networks = self.workspace_dir + '/pretrained_networks'
-        self.davis_dir = ''
-        self.youtubevos_dir = ''
+        self.davis_dir = '/DATACENTER/2/fzw/DAVIS2017'
+        self.youtubevos_dir = '/DATACENTER/2/fzw/YoutubeVOS'
 
 
 class Settings:

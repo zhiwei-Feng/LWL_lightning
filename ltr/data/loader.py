@@ -5,7 +5,7 @@ import torch
 import torch.utils.data.dataloader
 from torch._six import string_classes, int_classes
 
-from pytracking import TensorDict, TensorList
+from pytracking.libs import TensorDict, TensorList
 
 
 def _check_use_shared_memory():

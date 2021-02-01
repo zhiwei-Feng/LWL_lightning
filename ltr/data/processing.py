@@ -5,7 +5,7 @@ import torch
 import torchvision.transforms as transforms
 
 import ltr.data.processing_utils as prutils
-from pytracking import TensorDict
+from pytracking.libs import TensorDict
 
 
 def stack_tensors(x):

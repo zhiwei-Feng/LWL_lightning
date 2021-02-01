@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 import ltr.models.layers.filter as filter_layer
-from pytracking import TensorList
+from pytracking.libs import TensorList
 
 
 class LWTLResidual(nn.Module):

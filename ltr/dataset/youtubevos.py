@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-from ltr.admin.environment import env_settings
+import ltr.admin.settings as ws_settings
 from pytracking.evaluation import Sequence
 
 from ltr.data.image_loader import opencv_loader
@@ -90,7 +90,7 @@ class YouTubeVOS(VOSDatasetBase):
             vis_threshold - Minimum number of pixels required to consider a target object "visible".
             image_loader - Image loader.
         """
-        root = env_settings().youtubevos_dir if root is None else root
+        root = ws_settings.Settings().env.youtubevos_dir if root is None else root
         super().__init__(name="YouTubeVOS", root=Path(root), version=version, split=split, multiobj=multiobj,
                          vis_threshold=vis_threshold, image_loader=image_loader)
 

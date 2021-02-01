@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from ltr.admin.environment import env_settings
+import ltr.admin.settings as ws_settings
 from pytracking.evaluation import Sequence
 
 from ltr.data.image_loader import opencv_loader
@@ -35,13 +35,13 @@ class Davis(VOSDatasetBase):
         """
         if version == '2017':
             if split in ['train', 'val']:
-                root = env_settings().davis_dir if root is None else root
+                root = ws_settings.Settings().env.davis_dir if root is None else root
             elif split in ['test-dev']:
-                root = env_settings().davis_testdev_dir if root is None else root
+                root = ws_settings.Settings().env.davis_testdev_dir if root is None else root
             else:
                 raise Exception('Unknown split {}'.format(split))
         else:
-            root = env_settings().davis16_dir if root is None else root
+            root = ws_settings.Settings().env.davis16_dir if root is None else root
 
         super().__init__(name='DAVIS', root=Path(root), version=version, split=split, multiobj=multiobj,
                          vis_threshold=vis_threshold, image_loader=image_loader)

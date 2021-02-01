@@ -2,7 +2,7 @@ import random
 
 import torch.utils.data
 
-from pytracking import TensorDict
+from pytracking.libs import TensorDict
 
 
 def no_processing(data):

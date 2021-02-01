@@ -1,7 +1,7 @@
 import math
 import torch
 import torch.nn as nn
-from pytracking import TensorList
+from pytracking.libs import TensorList
 from ltr.models.layers import activation
 
 

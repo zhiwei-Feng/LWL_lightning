@@ -16,7 +16,7 @@ import ltr.models.meta.steepestdescent as steepestdescent
 import ltr.models.lwl.linear_filter as target_clf
 import ltr.models.lwl.decoder as lwtl_decoder
 from ltr.models.loss.segmentation import LovaszSegLoss
-from pytracking import TensorList
+from pytracking.libs import TensorList
 from pytracking.analysis.vos_utils import davis_jaccard_measure
 
 
@@ -46,6 +46,19 @@ def run(settings):
 
     # 准备好训练的dataloader
     lwl_dm = LWLDataModule(settings)
+    lwl_dm.setup()
+    model = LitLwlStage1(settings, filter_size=3, num_filters=16, optim_iter=5,
+                         backbone_pretrained=True,
+                         out_feature_dim=512,
+                         frozen_backbone_layers=['conv1', 'bn1', 'layer1', 'layer2', 'layer3',
+                                                 'layer4'],
+                         label_encoder_dims=(16, 32, 64),
+                         use_bn_in_label_enc=False,
+                         clf_feat_blocks=0,
+                         final_conv=True,
+                         backbone_type='mrcnn')
+    trainer = pl.Trainer(gpus=1)
+    trainer.fit(model, lwl_dm)
 
 
 class LitLwlStage1(pl.LightningModule):
@@ -127,11 +140,11 @@ class LitLwlStage1(pl.LightningModule):
 
         # Optimizer
         self.optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
-                                {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 1e-4},
-                                {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
-                                {'params': self.net.decoder.parameters(), 'lr': 1e-4},
-                                {'params': self.net.label_encoder.parameters(), 'lr': 2e-4}],
-                               lr=2e-4)
+                                     {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 1e-4},
+                                     {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
+                                     {'params': self.net.decoder.parameters(), 'lr': 1e-4},
+                                     {'params': self.net.label_encoder.parameters(), 'lr': 2e-4}],
+                                    lr=2e-4)
         self.lr_scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[40, ], gamma=0.2)
 
         # actor初始化
@@ -211,9 +224,7 @@ class LitLwlStage1(pl.LightningModule):
 
         return loss.items()
 
-    def configure_optimizers(
-            self,
-    ):
+    def configure_optimizers(self):
         return [self.optimizer], [self.lr_scheduler]
 
 
