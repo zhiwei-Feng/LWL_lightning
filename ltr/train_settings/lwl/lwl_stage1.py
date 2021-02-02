@@ -46,7 +46,6 @@ def run(settings):
 
     # 准备好训练的dataloader
     lwl_dm = LWLDataModule(settings)
-    lwl_dm.setup()
     model = LitLwlStage1(settings, filter_size=3, num_filters=16, optim_iter=5,
                          backbone_pretrained=True,
                          out_feature_dim=512,
