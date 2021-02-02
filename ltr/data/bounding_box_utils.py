@@ -45,8 +45,10 @@ def masks_to_bboxes(mask, fmt='c'):
     bboxes = []
 
     for m in mask:
-        mx = m.sum(dim=-2).nonzero()
-        my = m.sum(dim=-1).nonzero()
+        mx = torch.nonzero(m.sum(dim=-2), as_tuple=False)
+        my = torch.nonzero(m.sum(dim=-1), as_tuple=False)
+        # mx = m.sum(dim=-2).nonzero()
+        # my = m.sum(dim=-1).nonzero()
         bb = [mx.min(), my.min(), mx.max(), my.max()] if (len(mx) > 0 and len(my) > 0) else [0, 0, 0, 0]
         bboxes.append(bb)
 
@@ -72,8 +74,10 @@ def masks_to_bboxes_multi(mask, ids, fmt='c'):
     bboxes = []
 
     for id in ids:
-        mx = (mask == id).sum(dim=-2).nonzero()
-        my = (mask == id).float().sum(dim=-1).nonzero()
+        # mx = (mask == id).sum(dim=-2).nonzero()
+        # my = (mask == id).float().sum(dim=-1).nonzero()
+        mx = torch.nonzero((mask == id).sum(dim=-2), as_tuple=False)
+        my = torch.nonzero((mask == id).float().sum(dim=-1), as_tuple=False)
         bb = [mx.min(), my.min(), mx.max(), my.max()] if (len(mx) > 0 and len(my) > 0) else [0, 0, 0, 0]
 
         bb = torch.tensor(bb, dtype=torch.float32, device=mask.device)

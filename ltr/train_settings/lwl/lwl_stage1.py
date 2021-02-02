@@ -25,8 +25,8 @@ def run(settings):
                            'pre-trained Mask-RCNN weights. These weights can be obtained from ' \
                            'https://drive.google.com/file/d/12pVHmhqtxaJ151dZrXN1dcgUa7TuAjdA/view?usp=sharing. ' \
                            'Download and save these weights in env_settings.pretrained_networks directory'
-    settings.batch_size = 20
-    settings.num_workers = 8
+    settings.batch_size = 10
+    settings.num_workers = 4
     settings.multi_gpu = True
     settings.print_interval = 1
     settings.normalize_mean = [102.9801, 115.9465, 122.7717]
@@ -57,7 +57,7 @@ def run(settings):
                          clf_feat_blocks=0,
                          final_conv=True,
                          backbone_type='mrcnn')
-    trainer = pl.Trainer(gpus=1)
+    trainer = pl.Trainer(gpus=1, max_epochs=70)
     trainer.fit(model, lwl_dm)
 
 
@@ -192,7 +192,6 @@ class LitLwlStage1(pl.LightningModule):
         :param batch_idx:
         :return:
         """
-        print(type(batch))
         data = batch
         # data['epoch'] = self.epoch
         data['settings'] = self.settings
@@ -203,8 +202,8 @@ class LitLwlStage1(pl.LightningModule):
                              test_masks=data['test_masks'],
                              num_refinement_iter=self.num_refinement_iter)
 
-        acc = 0
-        cnt = 0
+        # acc = 0
+        # cnt = 0
 
         segm_pred = segm_pred.view(-1, 1, *segm_pred.shape[-2:])
         gt_segm = data['test_masks']
@@ -222,10 +221,16 @@ class LitLwlStage1(pl.LightningModule):
         if torch.isinf(loss) or torch.isnan(loss):
             raise Exception('ERROR: Loss was nan or inf!!!')
 
-        return loss.items()
+        return loss
 
     def configure_optimizers(self):
         return [self.optimizer], [self.lr_scheduler]
+
+    def get_progress_bar_dict(self):
+        # don't show the version number
+        items = super().get_progress_bar_dict()
+        items.pop("v_num", None)
+        return items
 
 
 class LWTLNet(torch.nn.Module):

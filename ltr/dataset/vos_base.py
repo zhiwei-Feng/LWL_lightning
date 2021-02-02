@@ -359,6 +359,7 @@ class VOSDatasetBase(BaseVideoDataset):
         # Generate bounding boxes for the requested objects
         bboxes = []
         for lb in labels:
+            lb = lb.copy()  # remove UserWarning
             lb = torch.from_numpy(lb.squeeze())
             frame_bbs = {}
             for obj_id in obj_ids:
