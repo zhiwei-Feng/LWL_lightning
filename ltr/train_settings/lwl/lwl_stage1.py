@@ -77,6 +77,7 @@ class LitLwlStage1(pl.LightningModule):
                  backbone_type='imagenet'):
         super().__init__()
         self.settings = settings
+        ############## BUILD NET ###################
         # backbone feature extractor F
         if backbone_type == 'imagenet':
             backbone_net = backbones.resnet50(pretrained=backbone_pretrained, frozen_layers=frozen_backbone_layers)
@@ -127,6 +128,7 @@ class LitLwlStage1(pl.LightningModule):
         self.net = LWTLNet(feature_extractor=backbone_net, target_model=target_model, decoder=decoder,
                            label_encoder=label_encoder,
                            target_model_input_layer=target_model_input_layer, decoder_input_layers=decoder_input_layers)
+        ############## BUILD NET ###################
         # Load pre-trained maskrcnn weights
         self._load_pretrained_weights()
 
