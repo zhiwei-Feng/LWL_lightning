@@ -57,12 +57,13 @@ def run(settings):
                          clf_feat_blocks=0,
                          final_conv=True,
                          backbone_type='mrcnn')
+    # model.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=69-step=34999.ckpt", settings)
     trainer = pl.Trainer(gpus=1, max_epochs=70, check_val_every_n_epoch=5, accumulate_grad_batches=2)
     trainer.fit(model, lwl_dm)
 
 
 class LitLwlStage1(pl.LightningModule):
-    def __init__(self, settings, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
+    def __init__(self, settings=None, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
                  backbone_pretrained=False, clf_feat_blocks=1,
                  clf_feat_norm=True, final_conv=False,
                  out_feature_dim=512,
@@ -76,6 +77,8 @@ class LitLwlStage1(pl.LightningModule):
                  dilation_factors=None,
                  backbone_type='imagenet'):
         super().__init__()
+        if settings is None:
+            raise Exception("settings cannot be None")
         self.settings = settings
         ############## BUILD NET ###################
         # backbone feature extractor F
@@ -129,8 +132,6 @@ class LitLwlStage1(pl.LightningModule):
                            label_encoder=label_encoder,
                            target_model_input_layer=target_model_input_layer, decoder_input_layers=decoder_input_layers)
         ############## BUILD NET ###################
-        # Load pre-trained maskrcnn weights
-        self._load_pretrained_weights()
 
         # Loss function
         self.objective = {
@@ -153,7 +154,8 @@ class LitLwlStage1(pl.LightningModule):
         self.num_refinement_iter = 2
         self.disable_backbone_bn = False
         self.disable_all_bn = True
-        self._update_settings(settings)
+        # Load pre-trained maskrcnn weights
+        self._load_pretrained_weights(settings)
 
     def _train_actor(self, mode=True):
         """ Set whether the network is in train mode.
@@ -169,23 +171,10 @@ class LitLwlStage1(pl.LightningModule):
                 if isinstance(m, torch.nn.BatchNorm2d):
                     m.eval()
 
-    def _load_pretrained_weights(self):
-        weights_path = os.path.join(self.settings.env.pretrained_networks, 'e2e_mask_rcnn_R_50_FPN_1x_converted.pkl')
+    def _load_pretrained_weights(self, settings):
+        weights_path = os.path.join(settings.env.pretrained_networks, 'e2e_mask_rcnn_R_50_FPN_1x_converted.pkl')
         pretrained_weights = torch.load(weights_path)
         self.net.feature_extractor.load_state_dict(pretrained_weights)
-
-    def _update_settings(self, settings=None):
-        """Updates the trainer settings. Must be called to update internal settings."""
-        if settings is not None:
-            self.settings = settings
-
-        if self.settings.env.workspace_dir is not None:
-            self.settings.env.workspace_dir = os.path.expanduser(self.settings.env.workspace_dir)
-            self._checkpoint_dir = os.path.join(self.settings.env.workspace_dir, 'checkpoints')
-            if not os.path.exists(self._checkpoint_dir):
-                os.makedirs(self._checkpoint_dir)
-        else:
-            self._checkpoint_dir = None
 
     def training_step(self, batch, batch_idx):
         """
