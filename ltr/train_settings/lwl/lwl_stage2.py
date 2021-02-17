@@ -23,8 +23,8 @@ from pytracking.analysis.vos_utils import davis_jaccard_measure
 
 def run(settings):
     settings.description = 'Default train settings for training full network'
-    settings.batch_size = 20
-    settings.num_workers = 8
+    settings.batch_size = 10
+    settings.num_workers = 4
     settings.multi_gpu = True
     settings.print_interval = 1
     settings.normalize_mean = [102.9801, 115.9465, 122.7717]
@@ -44,22 +44,26 @@ def run(settings):
 
     # 准备好训练的dataloader
     lwl_dm = LWLDataModule(settings)
-    model = LitLwlStage2(settings, filter_size=3, num_filters=16, optim_iter=5,
-                         backbone_pretrained=True,
-                         out_feature_dim=512,
-                         frozen_backbone_layers=['conv1', 'bn1', 'layer1'],
-                         label_encoder_dims=(16, 32, 64),
-                         use_bn_in_label_enc=False,
-                         clf_feat_blocks=0,
-                         final_conv=True,
-                         backbone_type='mrcnn')
-
+    # load stage1 weights
+    model = LitLwlStage2.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=69-step=34999.ckpt",
+                                              settings=settings,
+                                              filter_size=3,
+                                              num_filters=16,
+                                              optim_iter=5,
+                                              backbone_pretrained=True,
+                                              out_feature_dim=512,
+                                              frozen_backbone_layers=['conv1', 'bn1', 'layer1'],
+                                              label_encoder_dims=(16, 32, 64),
+                                              use_bn_in_label_enc=False,
+                                              clf_feat_blocks=0,
+                                              final_conv=True,
+                                              backbone_type='mrcnn')
     trainer = pl.Trainer(gpus=1, max_epochs=80, check_val_every_n_epoch=5, accumulate_grad_batches=2)
     trainer.fit(model, lwl_dm)
 
 
 class LitLwlStage2(pl.LightningModule):
-    def __init__(self, settings, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
+    def __init__(self, settings=None, filter_size=1, num_filters=1, optim_iter=3, optim_init_reg=0.01,
                  backbone_pretrained=False, clf_feat_blocks=1,
                  clf_feat_norm=True, final_conv=False,
                  out_feature_dim=512,
@@ -126,8 +130,6 @@ class LitLwlStage2(pl.LightningModule):
                            label_encoder=label_encoder,
                            target_model_input_layer=target_model_input_layer, decoder_input_layers=decoder_input_layers)
         ############## BUILD NET ###################
-        # load stage1 weights
-        self.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=69-step=34999.ckpt")
 
         # Loss function
         self.objective = {
@@ -137,24 +139,10 @@ class LitLwlStage2(pl.LightningModule):
             'segm': 100.0
         }
 
-        # Optimizer
-        self.optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
-                                     {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.decoder.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.label_encoder.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.feature_extractor.layer2.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.feature_extractor.layer3.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.feature_extractor.layer4.parameters(), 'lr': 2e-5}],
-                                    lr=2e-4)
-
-        self.lr_scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, [25, 75], gamma=0.2)
-
         # actor初始化
         self.num_refinement_iter = 2
         self.disable_backbone_bn = False
         self.disable_all_bn = True
-        self._update_settings(settings)
 
     def _train_actor(self, mode=True):
         """ Set whether the network is in train mode.
@@ -169,19 +157,6 @@ class LitLwlStage2(pl.LightningModule):
             for m in self.net.feature_extractor.modules():
                 if isinstance(m, torch.nn.BatchNorm2d):
                     m.eval()
-
-    def _update_settings(self, settings=None):
-        """Updates the trainer settings. Must be called to update internal settings."""
-        if settings is not None:
-            self.settings = settings
-
-        if self.settings.env.workspace_dir is not None:
-            self.settings.env.workspace_dir = os.path.expanduser(self.settings.env.workspace_dir)
-            self._checkpoint_dir = os.path.join(self.settings.env.workspace_dir, 'checkpoints')
-            if not os.path.exists(self._checkpoint_dir):
-                os.makedirs(self._checkpoint_dir)
-        else:
-            self._checkpoint_dir = None
 
     def training_step(self, batch, batch_idx):
         """
@@ -244,7 +219,19 @@ class LitLwlStage2(pl.LightningModule):
         self.log('val_acc', acc / cnt, on_step=True, prog_bar=True)
 
     def configure_optimizers(self):
-        return [self.optimizer], [self.lr_scheduler]
+        # Optimizer
+        optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
+                                {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 2e-5},
+                                {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
+                                {'params': self.net.decoder.parameters(), 'lr': 2e-5},
+                                {'params': self.net.label_encoder.parameters(), 'lr': 2e-5},
+                                {'params': self.net.feature_extractor.layer2.parameters(), 'lr': 2e-5},
+                                {'params': self.net.feature_extractor.layer3.parameters(), 'lr': 2e-5},
+                                {'params': self.net.feature_extractor.layer4.parameters(), 'lr': 2e-5}],
+                               lr=2e-4)
+
+        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, [25, 75], gamma=0.2)
+        return [optimizer], [lr_scheduler]
 
     def get_progress_bar_dict(self):
         # don't show the version number

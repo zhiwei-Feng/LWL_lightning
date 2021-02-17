@@ -47,17 +47,29 @@ def run(settings):
 
     # 准备好训练的dataloader
     lwl_dm = LWLDataModule(settings)
-    model = LitLwlStage1(settings, filter_size=3, num_filters=16, optim_iter=5,
+    model = LitLwlStage1(settings=settings,
+                         filter_size=3,
+                         num_filters=16,
+                         optim_iter=5,
                          backbone_pretrained=True,
                          out_feature_dim=512,
-                         frozen_backbone_layers=['conv1', 'bn1', 'layer1', 'layer2', 'layer3',
-                                                 'layer4'],
+                         frozen_backbone_layers=['conv1', 'bn1', 'layer1', 'layer2', 'layer3', 'layer4'],
                          label_encoder_dims=(16, 32, 64),
                          use_bn_in_label_enc=False,
                          clf_feat_blocks=0,
                          final_conv=True,
                          backbone_type='mrcnn')
-    # model.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=69-step=34999.ckpt", settings)
+    # model = LitLwlStage1.load_from_checkpoint("lightning_logs/version_0/checkpoints/epoch=1-step=581.ckpt", settings=settings,
+    #                            filter_size=3, num_filters=16, optim_iter=5,
+    #                            backbone_pretrained=True,
+    #                            out_feature_dim=512,
+    #                            frozen_backbone_layers=['conv1', 'bn1', 'layer1', 'layer2', 'layer3',
+    #                                                    'layer4'],
+    #                            label_encoder_dims=(16, 32, 64),
+    #                            use_bn_in_label_enc=False,
+    #                            clf_feat_blocks=0,
+    #                            final_conv=True,
+    #                            backbone_type='mrcnn')
     trainer = pl.Trainer(gpus=1, max_epochs=70, check_val_every_n_epoch=5, accumulate_grad_batches=2)
     trainer.fit(model, lwl_dm)
 
@@ -140,15 +152,6 @@ class LitLwlStage1(pl.LightningModule):
         self.loss_weight = {
             'segm': 100.0
         }
-
-        # Optimizer
-        self.optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
-                                     {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 1e-4},
-                                     {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
-                                     {'params': self.net.decoder.parameters(), 'lr': 1e-4},
-                                     {'params': self.net.label_encoder.parameters(), 'lr': 2e-4}],
-                                    lr=2e-4)
-        self.lr_scheduler = optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[40, ], gamma=0.2)
 
         # actor初始化
         self.num_refinement_iter = 2
@@ -237,7 +240,15 @@ class LitLwlStage1(pl.LightningModule):
         self.log('val_acc', acc / cnt, on_step=True, prog_bar=True)
 
     def configure_optimizers(self):
-        return [self.optimizer], [self.lr_scheduler]
+        # Optimizer
+        optimizer = optim.Adam([{'params': self.net.target_model.filter_initializer.parameters(), 'lr': 5e-5},
+                                {'params': self.net.target_model.filter_optimizer.parameters(), 'lr': 1e-4},
+                                {'params': self.net.target_model.feature_extractor.parameters(), 'lr': 2e-5},
+                                {'params': self.net.decoder.parameters(), 'lr': 1e-4},
+                                {'params': self.net.label_encoder.parameters(), 'lr': 2e-4}],
+                               lr=2e-4)
+        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[40, ], gamma=0.2)
+        return [optimizer], [lr_scheduler]
 
     def get_progress_bar_dict(self):
         # don't show the version number
